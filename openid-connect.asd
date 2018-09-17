@@ -17,7 +17,13 @@
 
                ;; for DB
                "datafly"
-               "sxql")
+               "sxql"
+
+               ;; for OAuth
+               "dexador"
+               "cl-base64"
+               "secure-random"
+               "jsown")
   :components ((:module "src"
                 :components
                 ((:file "main" :depends-on ("config" "view" "db"))

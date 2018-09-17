@@ -3,5 +3,9 @@
 {% block content %}
 <div id="main">
   Welcome to <a href="http://8arrow.org/caveman/">Caveman2</a>!
+  <form action="/auth-keycloak" method="post">
+    <button>Login with Keycloak</button>
+  </form>
 </div>
+
 {% endblock %}

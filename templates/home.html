@@ -1,0 +1,11 @@
+{% extends "layouts/default.html" %}
+{% block title %}You are logged in!{% endblock %}
+{% block content %}
+<div id="main">
+  Login Successful.
+  <form action="/logout" method="get">
+    <button>Logout</button>
+  </form>
+</div>
+{% endblock %}
+

@@ -112,6 +112,7 @@
     (redirect "/")))
 
 (defroute ("/auth-keycloak" :method :POST) ()
+  ;; RFC6746 Autorization Code Grant
   (let ((state-token
           (cl-base64:usb8-array-to-base64-string
             (secure-random:bytes 32 secure-random:*generator*))))
@@ -128,9 +129,9 @@
     (if (not (null (assoc :state session-oauth-keycloak)))
       ;; セッションのステートトークンがレスポンスのステートトークンと一致するか確認
       (if (string= (cdr (assoc :state session-oauth-keycloak)) |state|)
-        ;; レスポンスに認証コードが存在するか確認
+        ;; レスポンスに認可コードが存在するか確認
         (if (not (null |code|))
-          ;; keycloakの認証サーバーにトークンを要請
+          ;; 認可コードを使用して keycloakの認証サーバーにトークンを要請
           (let ((response (jsown:parse (request-keycloak-token |code|))))
             ;; ログイン成功。access_tokenを取り出してセッションの:access_tokenに格納
             (format t "[DEBUG] response '~A'~%" response)

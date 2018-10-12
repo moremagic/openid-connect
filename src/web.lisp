@@ -7,7 +7,8 @@
         :openid-connect.db
         :datafly
         :sxql
-        :quri)
+        :quri
+        :jose)
   (:export :*web*))
 (in-package :openid-connect.web)
 
@@ -54,6 +55,10 @@
 ;;
 ;; Utility functions
 
+(defun now ()
+  "NTP時刻とPOSIX時刻のオフセット(2208988800秒) を補正して現在時刻を返す"
+  (- (get-universal-time) 2208988800))
+
 (defun get-keycloak-auth-url (state-token)
   "keycloakアカウントでの認証URLを生成"
   (render-uri
@@ -88,8 +93,23 @@
 
 (defun loginp ()
   "ログインしているかどうかを確認"
-  (format t "[DEBUG] session in accsess_token '~A'~%" (gethash :access_token *session* nil))
-  (not (null (gethash :access_token *session* nil))))
+  (let
+    ((access_token (gethash :access_token *session* nil))
+     (id_token (gethash :id_token *session* nil)))
+      (format t "[DEBUG] session in accsess_token '~A'~%" access_token)
+      (format t "[DEBUG] session in id_token '~A'~%" id_token)
+      (if (not (null id_token))
+          (progn
+            (setf token-jwt (jose:inspect-token id_token))
+            (setf exp-jwt (cdr (assoc "exp" token-jwt :test #'string=)))
+            (format t "[DEBUG] id_token '~A'~%" token-jwt)
+            (format t "[DEBUG] now time '~A'~%" (now))
+            (format t "[DEBUG] exp time '~A'~%" exp-jwt)
+            (and
+              (not (null id_token))
+              (not (null access_token))
+              (> exp-jwt (now))))
+          nil)))
 
 (defun logout (refresh_token)
   "ログアウト処理"
@@ -98,8 +118,7 @@
     :headers `(("Content-Type" . "application/x-www-form-urlencoded"))
     :content `(("client_id" . ,+keycloak-client-id+)
                ("client_secret" . ,+keycloak-client-secret+)
-               ("refresh_token" . ,refresh_token )
-               )))
+               ("refresh_token" . ,refresh_token ))))
 
 (defroute "/" ()
   (if (loginp)
@@ -133,20 +152,24 @@
         (if (not (null |code|))
           ;; 認可コードを使用して keycloakの認証サーバーにトークンを要請
           (let ((response (jsown:parse (request-keycloak-token |code|))))
+
             ;; ログイン成功。access_tokenを取り出してセッションの:access_tokenに格納
-            (format t "[DEBUG] response '~A'~%" response)
+            (format t "[DEBUG] response '~A'~%" (jsown:to-json response))
             (setf (gethash :access_token *session*) (jsown:val response "access_token"))
             (setf (gethash :refresh_token *session*) (jsown:val response "refresh_token"))
+            (setf (gethash :id_token *session*) (jsown:val response "id_token"))
             (format t "[DEBUG] refresh_token '~A'~%" (gethash :refresh_token *session*))
 
             ;; トークンが有効か確認(ライフタイムが残っているか?)
             ;; さらにIDトークンの存在を確認
             (if (and (> (jsown:val response "expires_in") 0)
-                     (not (null (jsown:val response "id_token"))))
+                     (not (null (gethash :id_token *session* nil))))
               ;; IDトークンをkeycloakに投げてユーザー情報を取得
               ;; この処理は不要かも
               (let ((api-result
                       (jsown:parse (request-keycloak-token-info (gethash :access_token *session*)))))
+
+                (format t "[DEBUG] token-info response;json ~%'~A'~%=========~%" (jsown:to-json api-result))
 
                 ;; ユーザ名を取り出してセッションの:preferred_usernameに格納
                 ;; 本来ならここでJWTをばらして、ロール等の情報をセッションに登録をする
@@ -164,6 +187,7 @@
       (logout (gethash :refresh_token *session*))
       (setf (gethash :access_token *session*) nil)
       (setf (gethash :refresh_token *session*) nil)
+      (setf (gethash :id_token *session*) nil)
       (redirect "/"))
     (render #P"index.html")))
 

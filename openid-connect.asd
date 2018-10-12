@@ -23,7 +23,8 @@
                "dexador"
                "cl-base64"
                "secure-random"
-               "jsown")
+               "jsown"
+               "jose")
   :components ((:module "src"
                 :components
                 ((:file "main" :depends-on ("config" "view" "db"))

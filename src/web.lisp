@@ -38,9 +38,9 @@
 
 ;; auth parameter
 (defparameter +keycloak-client-id+
-  "openid-connect")
+  "lisp-app")
 (defparameter +keycloak-client-secret+
-  "9bc0468f-ce9b-4c90-ac93-4837b57494ab")
+  "39aa2ac7-a7e8-4ce7-a37c-a05c9eea5504")
 (defparameter +keycloak-auth-url+
   "http://localhost:18080/auth/realms/master/protocol/openid-connect/auth")
 (defparameter +keycloak-token-url+
@@ -59,6 +59,9 @@
   "NTP時刻とPOSIX時刻のオフセット(2208988800秒) を補正して現在時刻を返す"
   (- (get-universal-time) 2208988800))
 
+(defun logging (level &rest messages)
+  (format t "[~a] ~{~a~^ : ~} ~%" level messages))
+
 (defun get-keycloak-auth-url (state-token)
   "keycloakアカウントでの認証URLを生成"
   (render-uri
@@ -73,7 +76,7 @@
 
 (defun request-keycloak-token (code)
   "トークンを要請"
-  (format t "[DEBUG] call request-token ~A~%" code)
+  (logging "DEBUG" "call request-token" code)
   (dex:post +keycloak-token-url+
     :content `(("code" . ,code)
                ("client_id" . ,+keycloak-client-id+)
@@ -83,12 +86,11 @@
 
 (defun request-keycloak-token-info (access_token)
   "トークン情報を要請"
-  (format t "[DEBUG]===========================================~%")
-  (format t "[DEBUG][request-keycloak-token-info] '~A'~%" access_token)
+  (logging "DEBUG" "request-keycloak-token-info" "(access_token)" access_token)
   (dex:post +keycloak-token-info-url+
     :headers `(("content-type" . "application/json")
                ("Accept" . "application/json")
-               ("Authorization" . ,(concatenate `string "Bearer " access_token)))
+               ("Authorization" . ,(concatenate 'string "Bearer " access_token)))
     :content `()))
 
 (defun loginp ()
@@ -96,15 +98,15 @@
   (let
     ((access_token (gethash :access_token *session* nil))
      (id_token (gethash :id_token *session* nil)))
-      (format t "[DEBUG] session in accsess_token '~A'~%" access_token)
-      (format t "[DEBUG] session in id_token '~A'~%" id_token)
+      (logging "DEBUG" "access_token in session" access_token)
+      (logging "DEBUG" "id_token in session" id_token)
       (if (not (null id_token))
           (progn
             (setf token-jwt (jose:inspect-token id_token))
             (setf exp-jwt (cdr (assoc "exp" token-jwt :test #'string=)))
-            (format t "[DEBUG] id_token '~A'~%" token-jwt)
-            (format t "[DEBUG] now time '~A'~%" (now))
-            (format t "[DEBUG] exp time '~A'~%" exp-jwt)
+            (logging "DEBUG" "id_token" token-jwt)
+            (logging "DEBUG" "now time" (now))
+            (logging "DEBUG" "exp time" exp-jwt)
             (and
               (not (null id_token))
               (not (null access_token))
@@ -113,7 +115,7 @@
 
 (defun logout (refresh_token)
   "ログアウト処理"
-  (format t "[DEBUG]logout api call...")
+  (logging "DEBUG" "logout api call...")
   (dex:post +keycloak-logout-url+
     :headers `(("Content-Type" . "application/x-www-form-urlencoded"))
     :content `(("client_id" . ,+keycloak-client-id+)
@@ -141,7 +143,7 @@
 (defroute ("/oauth2callback" :method :GET) (&key |error| |state| |code|)
   ;; エラーが発生した場合はエラーを表示してそのままルートにリダイレクト
   (unless (null |error|)
-    (format t "Error: ~A~%" |error|)
+    (logging "ERROR" "Error: ~A~%" |error|)
     (redirect "/"))
   (let ((session-oauth-keycloak (gethash :oauth-keycloak *session* nil)))
     ;; セッションにステートトークンが存在するか確認
@@ -154,11 +156,9 @@
           (let ((response (jsown:parse (request-keycloak-token |code|))))
 
             ;; ログイン成功。access_tokenを取り出してセッションの:access_tokenに格納
-            (format t "[DEBUG] response '~A'~%" (jsown:to-json response))
             (setf (gethash :access_token *session*) (jsown:val response "access_token"))
             (setf (gethash :refresh_token *session*) (jsown:val response "refresh_token"))
             (setf (gethash :id_token *session*) (jsown:val response "id_token"))
-            (format t "[DEBUG] refresh_token '~A'~%" (gethash :refresh_token *session*))
 
             ;; トークンが有効か確認(ライフタイムが残っているか?)
             ;; さらにIDトークンの存在を確認
@@ -169,12 +169,12 @@
               (let ((api-result
                       (jsown:parse (request-keycloak-token-info (gethash :access_token *session*)))))
 
-                (format t "[DEBUG] token-info response;json ~%'~A'~%=========~%" (jsown:to-json api-result))
+                (logging "DEBUG" "token-info response;json" (jsown:to-json api-result))
 
                 ;; ユーザ名を取り出してセッションの:preferred_usernameに格納
                 ;; 本来ならここでJWTをばらして、ロール等の情報をセッションに登録をする
                 (let ((preferred_username (jsown:val api-result "preferred_username")))
-                  (format t "Signin: success keycloak OAuth '~A'~%" preferred_username)
+                  (logging "DEBUG" "Signin: success keycloak OAuth" preferred_username)
                   (setf (gethash :preferred_username *session*) preferred_username)
                   (redirect "/home")))))))))
     ;; 認証に失敗した場合はHTTP 401認証エラーコードを投げる
@@ -183,7 +183,7 @@
 (defroute "/logout" ()
   (if (loginp)
     (progn
-      (format t "[DEBUG] refresh_token '~A'~%" (gethash :refresh_token *session*))
+      (logging "DEBUG" "refresh_token" (gethash :refresh_token *session*))
       (logout (gethash :refresh_token *session*))
       (setf (gethash :access_token *session*) nil)
       (setf (gethash :refresh_token *session*) nil)

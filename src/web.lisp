@@ -40,17 +40,17 @@
 (defparameter +keycloak-client-id+
   "lisp-app")
 (defparameter +keycloak-client-secret+
-  "39aa2ac7-a7e8-4ce7-a37c-a05c9eea5504")
+  "")
 (defparameter +keycloak-auth-url+
-  "http://localhost:18080/auth/realms/master/protocol/openid-connect/auth")
+  "http://localhost:8080/auth/realms/example/protocol/openid-connect/auth")
 (defparameter +keycloak-token-url+
-  "http://localhost:18080/auth/realms/master/protocol/openid-connect/token")
+  "http://localhost:8080/auth/realms/example/protocol/openid-connect/token")
 (defparameter +keycloak-token-info-url+
-  "http://localhost:18080/auth/realms/master/protocol/openid-connect/userinfo")
+  "http://localhost:8080/auth/realms/example/protocol/openid-connect/userinfo")
 (defparameter +keycloak-logout-url+
-  "http://localhost:18080/auth/realms/master/protocol/openid-connect/logout")
+  "http://localhost:8080/auth/realms/example/protocol/openid-connect/logout")
 (defparameter +keycloak-redirect-uri+
-  "http://localhost:5000/oauth2callback")
+  "http://localhost:5000/oauth/callback")
 
 ;;
 ;; Utility functions
@@ -140,7 +140,7 @@
     (setf (gethash :oauth-keycloak *session*) (acons :state state-token (list)))
     (redirect (get-keycloak-auth-url state-token))))
 
-(defroute ("/oauth2callback" :method :GET) (&key |error| |state| |code|)
+(defroute ("/oauth/callback" :method :GET) (&key |error| |state| |code|)
   ;; エラーが発生した場合はエラーを表示してそのままルートにリダイレクト
   (unless (null |error|)
     (logging "ERROR" "Error: ~A~%" |error|)
@@ -191,3 +191,10 @@
       (redirect "/"))
     (render #P"index.html")))
 
+
+(defroute "/public" ()
+          "public message!")
+(defroute "/secured" ()
+          "secured message!")
+(defroute "/admin" ()
+          "admin message!")

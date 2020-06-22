@@ -23,6 +23,30 @@
 (clear-routing-rules *web*)
 
 ;;
+;; Utility functions
+
+(defun now ()
+  "NTP時刻とPOSIX時刻のオフセット(2208988800秒) を補正して現在時刻を返す"
+  (- (get-universal-time) 2208988800))
+
+(defun logging (level &rest messages)
+  (format t "[~a] ~{~a~^ : ~} ~%" level messages))
+
+(defun config-value (key)
+  (cadr (assoc key (config :keycloak))))
+
+;;
+;; auth parameter
+
+(defparameter +keycloak-client-id+ (config-value ':client-id))
+(defparameter +keycloak-client-secret+ (config-value ':client-secret))
+(defparameter +keycloak-auth-url+ (config-value ':auth-url))
+(defparameter +keycloak-token-url+ (config-value ':token-url))
+(defparameter +keycloak-token-info-url+ (config-value ':token-info-url))
+(defparameter +keycloak-logout-url+ (config-value ':logout-url))
+(defparameter +keycloak-redirect-uri+ (config-value ':redirect-uri))
+
+;;
 ;; Routing rules
 
 (defroute "/" ()
@@ -36,31 +60,6 @@
   (merge-pathnames #P"_errors/404.html"
                    *template-directory*))
 
-;; auth parameter
-(defparameter +keycloak-client-id+
-  "lisp-app")
-(defparameter +keycloak-client-secret+
-  "")
-(defparameter +keycloak-auth-url+
-  "http://localhost:8080/auth/realms/example/protocol/openid-connect/auth")
-(defparameter +keycloak-token-url+
-  "http://localhost:8080/auth/realms/example/protocol/openid-connect/token")
-(defparameter +keycloak-token-info-url+
-  "http://localhost:8080/auth/realms/example/protocol/openid-connect/userinfo")
-(defparameter +keycloak-logout-url+
-  "http://localhost:8080/auth/realms/example/protocol/openid-connect/logout")
-(defparameter +keycloak-redirect-uri+
-  "http://localhost:5000/oauth/callback")
-
-;;
-;; Utility functions
-
-(defun now ()
-  "NTP時刻とPOSIX時刻のオフセット(2208988800秒) を補正して現在時刻を返す"
-  (- (get-universal-time) 2208988800))
-
-(defun logging (level &rest messages)
-  (format t "[~a] ~{~a~^ : ~} ~%" level messages))
 
 (defun get-keycloak-auth-url (state-token)
   "keycloakアカウントでの認証URLを生成"
@@ -73,6 +72,15 @@
                        ("approval_prompt" . "force")
                        ("access_type" . "offline")
                        ("state" . ,state-token)))))
+
+(defun request-keycloak-token-using-refresh-token (refresh_token)
+  "トークンを要請"
+  (logging "DEBUG" "call request-keycloak-token-using-refresh-token" refresh_token)
+  (dex:post +keycloak-token-url+
+    :content `(("refresh_token" . ,refresh_token)
+               ("client_id" . ,+keycloak-client-id+)
+               ("client_secret" . ,+keycloak-client-secret+)
+               ("grant_type" . "refresh_token"))))
 
 (defun request-keycloak-token (code)
   "トークンを要請"
@@ -97,21 +105,58 @@
   "ログインしているかどうかを確認"
   (let
     ((access_token (gethash :access_token *session* nil))
-     (id_token (gethash :id_token *session* nil)))
-      (logging "DEBUG" "access_token in session" access_token)
-      (logging "DEBUG" "id_token in session" id_token)
-      (if (not (null id_token))
-          (progn
-            (setf token-jwt (jose:inspect-token id_token))
-            (setf exp-jwt (cdr (assoc "exp" token-jwt :test #'string=)))
-            (logging "DEBUG" "id_token" token-jwt)
-            (logging "DEBUG" "now time" (now))
-            (logging "DEBUG" "exp time" exp-jwt)
-            (and
-              (not (null id_token))
-              (not (null access_token))
-              (> exp-jwt (now))))
-          nil)))
+     (id_token (gethash :id_token *session* nil))
+     (refresh_token (gethash :refresh_token *session* nil)))
+      (logging "DEBUG" "[loginp] access_token in session" access_token)
+      (logging "DEBUG" "[loginp] id_token in session" id_token)
+      (logging "DEBUG" "[loginp] refresh_token in session" refresh_token)
+      (if (and
+          (not (null id_token))
+          (not (null access_token))
+          (not (null refresh_token)))
+          (if (token-expirep access_token)
+              (refresh-token-flow refresh_token)
+              t)
+        nil)))
+
+(defun token-expirep (access_token)
+  "有効期限が切れている場合 t"
+  (logging "DEBUG" "token expirep  call...")
+  (if (not (null access_token))
+    (progn
+      (setf token-jwt (jose:inspect-token access_token))
+      (setf exp-jwt (cdr (assoc "exp" token-jwt :test #'string=)))
+       (logging "DEBUG" "access_token" token-jwt)
+       (logging "DEBUG" "now time" (now))
+       (logging "DEBUG" "exp time" exp-jwt)
+       (and
+         (not (null access_token))
+         (< exp-jwt (now))))
+     nil))
+
+(defun refresh-token-flow (refresh_token)
+  "リフレッシュトークンフローによるトークンの更新"
+  (logging "DEBUG" "call refresh-token-flow" refresh_token)
+  (if (not (null refresh_token))
+    (progn
+      (setf token-jwt (jose:inspect-token refresh_token))
+      (setf exp-jwt (cdr (assoc "exp" token-jwt :test #'string=)))
+       (logging "DEBUG" "refresh_token" token-jwt)
+       (logging "DEBUG" "now time" (now))
+       (logging "DEBUG" "exp time" exp-jwt)
+       (if
+         (and
+           (not (null refresh_token))
+           (> exp-jwt (now)))
+
+	  ;; 認可コードを使用して keycloakの認証サーバーにトークンを要請
+          (let ((response (jsown:parse (request-keycloak-token-using-refresh-token refresh_token))))
+            ;; ログイン成功。access_tokenを取り出してセッションの:access_tokenに格納
+            (setf (gethash :access_token *session*) (jsown:val response "access_token"))
+            (setf (gethash :refresh_token *session*) (jsown:val response "refresh_token"))
+            (setf (gethash :id_token *session*) (jsown:val response "id_token")))
+     nil))))
+
 
 (defun logout (refresh_token)
   "ログアウト処理"

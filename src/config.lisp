@@ -20,7 +20,15 @@
 (defparameter *template-directory* (merge-pathnames #P"templates/" *application-root*))
 
 (defconfig :common
-  `(:databases ((:maindb :sqlite3 :database-name ":memory:"))))
+  `(:databases ((:maindb :sqlite3 :database-name ":memory:"))
+    :keycloak
+    ((:client-id "lisp-app")
+     (:client-secret "Enter the client secret created with Keycloak here")
+     (:auth-url "http://localhost:18080/auth/realms/example/protocol/openid-connect/auth")
+     (:token-url "http://localhost:18080/auth/realms/example/protocol/openid-connect/token")
+     (:token-info-url "http://localhost:18080/auth/realms/example/protocol/openid-connect/userinfo")
+     (:logout-url "http://localhost:18080/auth/realms/example/protocol/openid-connect/logout")
+     (:redirect-uri "http://localhost:5000/oauth/callback"))))
 
 (defconfig |development|
   '())
